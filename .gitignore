@@ -1,0 +1,13 @@
+# Local environment files and secrets
+.env.local
+.env.*.local
+.env
+
+# Next.js build output
+.next/
+out/
+node_modules/
+
+# Local macOS files
+.DS_Store
+node_modules
