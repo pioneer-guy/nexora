@@ -17,9 +17,10 @@ function officialResources(topic) {
 }
 
 async function youtubePlaylists(topic,career,language) {
-  if(!process.env.YOUTUBE_API_KEY)return [];
+  const apiKey=process.env.YOUTUBE_API_KEY||process.env.GOOGLE_API_KEY;
+  if(!apiKey)return [];
   const query=encodeURIComponent(`${career} ${topic} complete course playlist ${language}`);
-  const response=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=playlist&maxResults=5&order=relevance&q=${query}&key=${process.env.YOUTUBE_API_KEY}`,{next:{revalidate:3600}});
+  const response=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=playlist&maxResults=5&order=relevance&q=${query}&key=${apiKey}`,{next:{revalidate:3600}});
   if(!response.ok)throw new Error('YouTube request failed.');
   const data=await response.json();
   return (data.items||[]).map(item=>({title:item.snippet.title,source:item.snippet.channelTitle,url:`https://www.youtube.com/playlist?list=${item.id.playlistId}`,type:'YouTube playlist',language}));
@@ -33,7 +34,8 @@ export async function GET(request){
   if(!topic)return NextResponse.json({error:'A learning topic is required.'},{status:400});
   try {
     const playlists=await youtubePlaylists(topic,career,language);
-    return NextResponse.json({topic,career,language,resources:officialResources(topic),playlists,live:Boolean(process.env.YOUTUBE_API_KEY),notice:playlists.length?'Playlists are ranked by YouTube relevance. Review the creator and syllabus before starting.':'Add YOUTUBE_API_KEY to discover current YouTube playlists. Trusted reading is still available.'},{headers:{'Cache-Control':'public, s-maxage=3600, stale-while-revalidate=86400'}});
+    const configured=Boolean(process.env.YOUTUBE_API_KEY||process.env.GOOGLE_API_KEY);
+    return NextResponse.json({topic,career,language,resources:officialResources(topic),playlists,live:configured,notice:playlists.length?'Playlists are ranked by YouTube relevance. Review the creator and syllabus before starting.':configured?'YouTube returned no playlists for this topic. Trusted reading is still available.':'Add YOUTUBE_API_KEY or GOOGLE_API_KEY to discover current YouTube playlists. Trusted reading is still available.'},{headers:{'Cache-Control':'public, s-maxage=3600, stale-while-revalidate=86400'}});
   } catch {
     return NextResponse.json({topic,career,language,resources:officialResources(topic),playlists:[],live:false,notice:'YouTube data is temporarily unavailable. Trusted reading is still available.'},{status:200});
   }
