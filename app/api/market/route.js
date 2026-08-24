@@ -1,20 +1,9 @@
 import {NextResponse} from 'next/server';
 import {generateAIResponse,parseAIJson} from '../../../lib/ai/provider';
 
-const jobs=[
-  {role:'AI / ML Engineer',demandIndicator:'Rising',geography:'Global'},
-  {role:'Cybersecurity Analyst',demandIndicator:'Rising',geography:'Global'},
-  {role:'Cloud / DevOps Engineer',demandIndicator:'High',geography:'Global'},
-  {role:'Data Analyst',demandIndicator:'High',geography:'Global'},
-  {role:'Music Producer',demandIndicator:'Growing',geography:'Global'},
-  {role:'Sound Designer',demandIndicator:'Growing',geography:'Global'},
-  {role:'UI/UX Designer',demandIndicator:'Steady',geography:'Global'},
-  {role:'Digital Marketing Specialist',demandIndicator:'Steady',geography:'Global'}
-];
-
-export async function GET(req){
-  const data={source:'Prototype Snapshot',lastUpdated:'2026-08-22',isLive:false,notice:'Market Pulse — Prototype Snapshot. Configure a verified market data provider for live demand.',jobs};
-  if(new URL(req.url).searchParams.get('summarize')!=='1')return NextResponse.json(data);
-  const response=await generateAIResponse({messages:[{role:'system',content:'Summarize why these roles may be trending based only on the supplied snapshot. Do not invent live statistics. Return JSON: {"summary":"string"}.'},{role:'user',content:JSON.stringify(jobs)}],temperature:.3});
-  return NextResponse.json({...data,summary:parseAIJson(response)?.summary||response.text,mode:response.mode});
-}
+const sourceUrl='https://remotive.com/api/remote-jobs?limit=100';
+const categoryFor=title=>{const value=title.toLowerCase();if(/design|ux|ui|visual/.test(value))return 'Design';if(/market|sales|business|finance|account|product|customer/.test(value))return 'Business';if(/music|audio|sound|video|content|writer|game/.test(value))return 'Creative';return 'Technology'};
+const indicatorFor=count=>count>=8?'High':count>=4?'Rising':count>=2?'Growing':'Emerging';
+function weeklyPulse(jobs){const now=Date.now(),weeks=[0,1,2,3,4].map(week=>jobs.filter(job=>now-new Date(job.publication_date||job.created_at||now).getTime()>=week*604800000&&now-new Date(job.publication_date||job.created_at||now).getTime()<(week+1)*604800000).length);const peak=Math.max(...weeks,1);return weeks.reverse().map(value=>Math.round(value/peak*100))}
+async function fetchOnlineJobs(){const response=await fetch(sourceUrl,{headers:{Accept:'application/json'},next:{revalidate:1800}});if(!response.ok)throw new Error(`Market provider returned ${response.status}.`);const data=await response.json();return Array.isArray(data.jobs)?data.jobs:[]}
+export async function GET(req){try{const onlineJobs=await fetchOnlineJobs();const grouped=new Map();for(const job of onlineJobs){const role=(job.title||'').replace(/\s+/g,' ').trim();if(!role)continue;const key=role.toLowerCase();const current=grouped.get(key)||{role,category:categoryFor(role),postings:[]};current.postings.push(job);grouped.set(key,current)}const jobs=[...grouped.values()].sort((a,b)=>b.postings.length-a.postings.length).slice(0,15).map(item=>({role:item.role,category:item.category,demandIndicator:indicatorFor(item.postings.length),geography:'Remote',postings:item.postings.length,pulse:weeklyPulse(item.postings),periods:['4 weeks ago','3 weeks ago','2 weeks ago','Last week','This week'],url:item.postings[0]?.url||null}));const data={source:'Remotive live job listings',lastUpdated:new Date().toISOString(),isLive:true,notice:'Demand signals are calculated from current online job listings and grouped by role title.',categories:[...new Set(jobs.map(job=>job.category))],jobs};if(new URL(req.url).searchParams.get('summarize')!=='1')return NextResponse.json(data);const response=await generateAIResponse({messages:[{role:'system',content:'Summarize this live job-listing snapshot without inventing statistics. Return JSON: {"summary":"string"}.'},{role:'user',content:JSON.stringify(jobs)}],temperature:.2});return NextResponse.json({...data,summary:parseAIJson(response)?.summary||'Live job listings are available below.',mode:response.mode||'live'})}catch(error){console.error('[NEXORA market]',error);return NextResponse.json({source:'Unavailable',lastUpdated:null,isLive:false,notice:'Live market data is temporarily unavailable. No synthetic demand data is being shown.',categories:[],jobs:[]},{status:200})}}
